@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using TaskFlow.API.Data;
 using TaskFlow.API.DTOs;
 using TaskFlow.API.Services;
+using TaskFlow.API.Settings;
 using Xunit;
 
 namespace TaskFlow.Tests;
@@ -16,7 +17,14 @@ public class AuthServiceTests
             .Options;
 
         await using var context = new ApplicationDbContext(options);
-        var service = new AuthService(context);
+        var jwtSettings = new JwtSettings
+        {
+            Key = new string('x', 64),
+            Issuer = "TaskFlowAPI",
+            Audience = "TaskFlowClient",
+            ExpiryMinutes = 60
+        };
+        var service = new AuthService(context, jwtSettings);
 
         var result = await service.RegisterAsync(new RegisterRequest
         {
@@ -39,7 +47,14 @@ public class AuthServiceTests
             .Options;
 
         await using var context = new ApplicationDbContext(options);
-        var service = new AuthService(context);
+        var jwtSettings = new JwtSettings
+        {
+            Key = new string('x', 64),
+            Issuer = "TaskFlowAPI",
+            Audience = "TaskFlowClient",
+            ExpiryMinutes = 60
+        };
+        var service = new AuthService(context, jwtSettings);
 
         await service.RegisterAsync(new RegisterRequest
         {
