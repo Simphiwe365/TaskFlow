@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using TaskFlow.API.Data;
 using TaskFlow.API.DTOs;
 using TaskFlow.API.Models;
+using TaskFlowTaskStatus = TaskFlow.API.Models.TaskStatus;
 
 namespace TaskFlow.API.Controllers;
 
@@ -23,9 +24,14 @@ public class TasksController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<TaskResponse>>> GetTasks(int projectId)
     {
-        var userId = GetCurrentUserId();
+        if (!TryGetCurrentUserId(out var userId))
+        {
+            return Unauthorized();
+        }
 
-        var projectExists = await _context.Projects.AnyAsync(p => p.Id == projectId && p.OwnerId == userId);
+        var projectExists = await _context.Projects.AnyAsync(
+            p => p.Id == projectId && p.OwnerId == userId);
+
         if (!projectExists)
         {
             return NotFound();
@@ -60,25 +66,100 @@ public class TasksController : ControllerBase
         return Ok(tasks);
     }
 
-    [HttpPost]
-    public async Task<ActionResult<TaskResponse>> CreateTask(int projectId, [FromBody] CreateTaskRequest request)
+    [HttpGet("{taskId:int}")]
+    public async Task<ActionResult<TaskResponse>> GetTaskById(int projectId, int taskId)
     {
-        var userId = GetCurrentUserId();
+        if (!TryGetCurrentUserId(out var userId))
+        {
+            return Unauthorized();
+        }
 
-        var project = await _context.Projects.FirstOrDefaultAsync(p => p.Id == projectId && p.OwnerId == userId);
+        var task = await _context.Tasks
+            .AsNoTracking()
+            .Include(t => t.Assignee)
+            .Where(t =>
+                t.Id == taskId &&
+                t.ProjectId == projectId &&
+                t.Project.OwnerId == userId)
+            .Select(t => new TaskResponse
+            {
+                Id = t.Id,
+                ProjectId = t.ProjectId,
+                Title = t.Title,
+                Description = t.Description,
+                Status = t.Status,
+                Priority = t.Priority,
+                DueDate = t.DueDate,
+                CreatedAt = t.CreatedAt,
+                UpdatedAt = t.UpdatedAt,
+                AssigneeId = t.AssigneeId,
+                Assignee = t.Assignee == null ? null : new UserSummaryDto
+                {
+                    Id = t.Assignee.Id,
+                    Username = t.Assignee.Username,
+                    Email = t.Assignee.Email
+                }
+            })
+            .FirstOrDefaultAsync();
+
+        if (task is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(task);
+    }
+
+    [HttpPost]
+    public async Task<ActionResult<TaskResponse>> CreateTask(
+        int projectId,
+        [FromBody] CreateTaskRequest request)
+    {
+        if (!TryGetCurrentUserId(out var userId))
+        {
+            return Unauthorized();
+        }
+
+        var project = await _context.Projects.FirstOrDefaultAsync(
+            p => p.Id == projectId && p.OwnerId == userId);
+
         if (project is null)
         {
             return NotFound();
         }
 
-        if (string.IsNullOrWhiteSpace(request.Title))
+        var title = request.Title?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(title))
         {
-            return BadRequest(new { message = "Task title is required." });
+            return BadRequest(new { message = "Task title is required and cannot contain only whitespace." });
+        }
+
+        if (title.Length > 150)
+        {
+            return BadRequest(new { message = "Task title cannot exceed 150 characters." });
+        }
+
+        var description = request.Description?.Trim();
+        if (description is not null && description.Length > 2000)
+        {
+            return BadRequest(new { message = "Task description cannot exceed 2000 characters." });
+        }
+
+        if (!Enum.IsDefined(request.Status))
+        {
+            return BadRequest(new { message = "Invalid task status." });
+        }
+
+        if (!Enum.IsDefined(request.Priority))
+        {
+            return BadRequest(new { message = "Invalid task priority." });
         }
 
         if (request.AssigneeId.HasValue)
         {
-            var assigneeExists = await _context.Users.AnyAsync(u => u.Id == request.AssigneeId.Value && u.Id != userId);
+            var assigneeExists = await _context.Users.AnyAsync(
+                u => u.Id == request.AssigneeId.Value);
+
             if (!assigneeExists)
             {
                 return BadRequest(new { message = "Assignee must be a valid user in the system." });
@@ -88,8 +169,8 @@ public class TasksController : ControllerBase
         var task = new TaskItem
         {
             ProjectId = projectId,
-            Title = request.Title.Trim(),
-            Description = request.Description,
+            Title = title,
+            Description = description,
             Status = request.Status,
             Priority = request.Priority,
             DueDate = request.DueDate,
@@ -129,96 +210,135 @@ public class TasksController : ControllerBase
         return CreatedAtAction(nameof(GetTaskById), new { projectId, taskId = task.Id }, createdTask);
     }
 
-    [HttpGet("{taskId:int}")]
-    public async Task<ActionResult<TaskResponse>> GetTaskById(int projectId, int taskId)
-    {
-        var userId = GetCurrentUserId();
-
-        var task = await _context.Tasks
-            .AsNoTracking()
-            .Include(t => t.Assignee)
-            .Where(t => t.Id == taskId && t.ProjectId == projectId && t.Project.OwnerId == userId)
-            .Select(t => new TaskResponse
-            {
-                Id = t.Id,
-                ProjectId = t.ProjectId,
-                Title = t.Title,
-                Description = t.Description,
-                Status = t.Status,
-                Priority = t.Priority,
-                DueDate = t.DueDate,
-                CreatedAt = t.CreatedAt,
-                UpdatedAt = t.UpdatedAt,
-                AssigneeId = t.AssigneeId,
-                Assignee = t.Assignee == null ? null : new UserSummaryDto
-                {
-                    Id = t.Assignee.Id,
-                    Username = t.Assignee.Username,
-                    Email = t.Assignee.Email
-                }
-            })
-            .FirstOrDefaultAsync();
-
-        if (task is null)
-        {
-            return NotFound();
-        }
-
-        return Ok(task);
-    }
-
     [HttpPut("{taskId:int}")]
-    public async Task<ActionResult<TaskResponse>> UpdateTask(int projectId, int taskId, [FromBody] UpdateTaskRequest request)
+    public async Task<ActionResult<TaskResponse>> UpdateTask(
+        int projectId,
+        int taskId,
+        [FromBody] UpdateTaskRequest request)
     {
-        var userId = GetCurrentUserId();
+        if (!TryGetCurrentUserId(out var userId))
+        {
+            return Unauthorized();
+        }
 
         var task = await _context.Tasks
             .Include(t => t.Assignee)
-            .FirstOrDefaultAsync(t => t.Id == taskId && t.ProjectId == projectId && t.Project.OwnerId == userId);
+            .FirstOrDefaultAsync(t =>
+                t.Id == taskId &&
+                t.ProjectId == projectId &&
+                t.Project.OwnerId == userId);
 
         if (task is null)
         {
             return NotFound();
         }
 
-        if (!string.IsNullOrWhiteSpace(request.Title))
+        string? updatedTitle = null;
+        if (request.Title is not null)
         {
-            task.Title = request.Title.Trim();
+            var title = request.Title.Trim();
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                return BadRequest(new { message = "Task title cannot contain only whitespace." });
+            }
+
+            if (title.Length > 150)
+            {
+                return BadRequest(new { message = "Task title cannot exceed 150 characters." });
+            }
+
+            updatedTitle = title;
         }
 
+        string? updatedDescription = null;
         if (request.Description is not null)
         {
-            task.Description = request.Description;
+            var description = request.Description.Trim();
+            if (description.Length > 2000)
+            {
+                return BadRequest(new { message = "Task description cannot exceed 2000 characters." });
+            }
+
+            updatedDescription = description;
         }
 
+        TaskFlowTaskStatus? updatedStatus = null;
         if (request.Status.HasValue)
         {
-            task.Status = request.Status.Value;
+            if (!Enum.IsDefined(request.Status.Value))
+            {
+                return BadRequest(new { message = "Invalid task status." });
+            }
+
+            updatedStatus = request.Status.Value;
         }
 
+        TaskPriority? updatedPriority = null;
         if (request.Priority.HasValue)
         {
-            task.Priority = request.Priority.Value;
+            if (!Enum.IsDefined(request.Priority.Value))
+            {
+                return BadRequest(new { message = "Invalid task priority." });
+            }
+
+            updatedPriority = request.Priority.Value;
         }
 
-        if (request.DueDate.HasValue)
-        {
-            task.DueDate = request.DueDate;
-        }
-
+        int? updatedAssigneeId = null;
         if (request.AssigneeId.HasValue)
         {
-            var assigneeExists = await _context.Users.AnyAsync(u => u.Id == request.AssigneeId.Value);
+            var assigneeExists = await _context.Users.AnyAsync(
+                u => u.Id == request.AssigneeId.Value);
+
             if (!assigneeExists)
             {
                 return BadRequest(new { message = "Assignee must be a valid user in the system." });
             }
 
-            task.AssigneeId = request.AssigneeId.Value;
+            updatedAssigneeId = request.AssigneeId.Value;
+        }
+
+        var updatedDueDate = request.DueDate;
+
+        if (updatedTitle is not null)
+        {
+            task.Title = updatedTitle;
+        }
+
+        if (request.Description is not null)
+        {
+            task.Description = updatedDescription;
+        }
+
+        if (updatedStatus.HasValue)
+        {
+            task.Status = updatedStatus.Value;
+        }
+
+        if (updatedPriority.HasValue)
+        {
+            task.Priority = updatedPriority.Value;
+        }
+
+        if (updatedDueDate is not null)
+        {
+            task.DueDate = updatedDueDate.Value;
+        }
+
+        if (request.AssigneeId.HasValue)
+        {
+            task.AssigneeId = updatedAssigneeId;
         }
 
         task.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();
+
+        var assignee = task.Assignee;
+        if (request.AssigneeId.HasValue)
+        {
+            assignee = await _context.Users.AsNoTracking().FirstOrDefaultAsync(
+                u => u.Id == request.AssigneeId.Value);
+        }
 
         return Ok(new TaskResponse
         {
@@ -232,11 +352,11 @@ public class TasksController : ControllerBase
             CreatedAt = task.CreatedAt,
             UpdatedAt = task.UpdatedAt,
             AssigneeId = task.AssigneeId,
-            Assignee = task.Assignee == null ? null : new UserSummaryDto
+            Assignee = assignee == null ? null : new UserSummaryDto
             {
-                Id = task.Assignee.Id,
-                Username = task.Assignee.Username,
-                Email = task.Assignee.Email
+                Id = assignee.Id,
+                Username = assignee.Username,
+                Email = assignee.Email
             }
         });
     }
@@ -244,9 +364,16 @@ public class TasksController : ControllerBase
     [HttpDelete("{taskId:int}")]
     public async Task<IActionResult> DeleteTask(int projectId, int taskId)
     {
-        var userId = GetCurrentUserId();
+        if (!TryGetCurrentUserId(out var userId))
+        {
+            return Unauthorized();
+        }
 
-        var task = await _context.Tasks.FirstOrDefaultAsync(t => t.Id == taskId && t.ProjectId == projectId && t.Project.OwnerId == userId);
+        var task = await _context.Tasks.FirstOrDefaultAsync(t =>
+            t.Id == taskId &&
+            t.ProjectId == projectId &&
+            t.Project.OwnerId == userId);
+
         if (task is null)
         {
             return NotFound();
@@ -258,9 +385,9 @@ public class TasksController : ControllerBase
         return NoContent();
     }
 
-    private int GetCurrentUserId()
+    private bool TryGetCurrentUserId(out int userId)
     {
         var claimValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return int.Parse(claimValue ?? "0");
+        return int.TryParse(claimValue, out userId) && userId > 0;
     }
 }
