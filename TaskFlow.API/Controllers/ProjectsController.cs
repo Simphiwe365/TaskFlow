@@ -23,7 +23,10 @@ public class ProjectsController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<ProjectResponse>>> GetProjects()
     {
-        var userId = GetCurrentUserId();
+        if (!TryGetCurrentUserId(out var userId))
+        {
+            return Unauthorized();
+        }
 
         var projects = await _context.Projects
             .AsNoTracking()
@@ -47,7 +50,10 @@ public class ProjectsController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<ActionResult<ProjectResponse>> GetProject(int id)
     {
-        var userId = GetCurrentUserId();
+        if (!TryGetCurrentUserId(out var userId))
+        {
+            return Unauthorized();
+        }
 
         var project = await _context.Projects
             .AsNoTracking()
@@ -75,17 +81,33 @@ public class ProjectsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<ProjectResponse>> CreateProject([FromBody] CreateProjectRequest request)
     {
+        if (!TryGetCurrentUserId(out var userId))
+        {
+            return Unauthorized();
+        }
+
         if (string.IsNullOrWhiteSpace(request.Name))
         {
-            return BadRequest(new { message = "Project name is required." });
+            return BadRequest(new { message = "Project name is required and cannot contain only whitespace." });
+        }
+
+        var name = request.Name.Trim();
+        if (name.Length > 100)
+        {
+            return BadRequest(new { message = "Project name cannot exceed 100 characters." });
+        }
+
+        if (request.Description is not null && request.Description.Length > 1000)
+        {
+            return BadRequest(new { message = "Project description cannot exceed 1000 characters." });
         }
 
         var project = new Project
         {
-            Name = request.Name.Trim(),
-            Description = request.Description,
+            Name = name,
+            Description = request.Description?.Trim(),
             DueDate = request.DueDate,
-            OwnerId = GetCurrentUserId()
+            OwnerId = userId
         };
 
         _context.Projects.Add(project);
@@ -106,7 +128,10 @@ public class ProjectsController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<ActionResult<ProjectResponse>> UpdateProject(int id, [FromBody] UpdateProjectRequest request)
     {
-        var userId = GetCurrentUserId();
+        if (!TryGetCurrentUserId(out var userId))
+        {
+            return Unauthorized();
+        }
 
         var project = await _context.Projects.FirstOrDefaultAsync(p => p.Id == id && p.OwnerId == userId);
         if (project is null)
@@ -114,19 +139,50 @@ public class ProjectsController : ControllerBase
             return NotFound();
         }
 
-        if (!string.IsNullOrWhiteSpace(request.Name))
+        string? updatedName = null;
+        if (request.Name is not null)
         {
-            project.Name = request.Name.Trim();
+            var name = request.Name.Trim();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return BadRequest(new { message = "Project name cannot contain only whitespace." });
+            }
+
+            if (name.Length > 100)
+            {
+                return BadRequest(new { message = "Project name cannot exceed 100 characters." });
+            }
+
+            updatedName = name;
+        }
+
+        string? updatedDescription = null;
+        if (request.Description is not null)
+        {
+            var description = request.Description.Trim();
+            if (description.Length > 1000)
+            {
+                return BadRequest(new { message = "Project description cannot exceed 1000 characters." });
+            }
+
+            updatedDescription = description;
+        }
+
+        var updatedDueDate = request.DueDate;
+
+        if (updatedName is not null)
+        {
+            project.Name = updatedName;
         }
 
         if (request.Description is not null)
         {
-            project.Description = request.Description;
+            project.Description = updatedDescription;
         }
 
-        if (request.DueDate is not null)
+        if (updatedDueDate is not null)
         {
-            project.DueDate = request.DueDate.Value;
+            project.DueDate = updatedDueDate.Value;
         }
 
         await _context.SaveChangesAsync();
@@ -146,7 +202,10 @@ public class ProjectsController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> DeleteProject(int id)
     {
-        var userId = GetCurrentUserId();
+        if (!TryGetCurrentUserId(out var userId))
+        {
+            return Unauthorized();
+        }
 
         var project = await _context.Projects.FirstOrDefaultAsync(p => p.Id == id && p.OwnerId == userId);
         if (project is null)
@@ -160,9 +219,9 @@ public class ProjectsController : ControllerBase
         return NoContent();
     }
 
-    private int GetCurrentUserId()
+    private bool TryGetCurrentUserId(out int userId)
     {
         var claimValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return int.Parse(claimValue ?? "0");
+        return int.TryParse(claimValue, out userId) && userId > 0;
     }
 }
