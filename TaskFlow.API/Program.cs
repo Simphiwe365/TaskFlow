@@ -41,6 +41,16 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("TaskFlowClient", policy =>
+    {
+        policy.WithOrigins("http://localhost:5173")
+            .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+            .WithHeaders("Content-Type", "Authorization");
+    });
+});
+
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
@@ -49,6 +59,9 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseCors("TaskFlowClient");
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapGet("/api/health", () => Results.Ok(new
 {
@@ -56,8 +69,6 @@ app.MapGet("/api/health", () => Results.Ok(new
     application = "TaskFlow API"
 }));
 
-app.UseAuthentication();
-app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
