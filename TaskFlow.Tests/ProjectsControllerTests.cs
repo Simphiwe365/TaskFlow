@@ -83,6 +83,24 @@ public class ProjectsControllerTests
     }
 
     [Fact]
+    public async Task GetProjects_ShouldReturnOnlyProjectsOwnedByCurrentUser()
+    {
+        await using var context = CreateContext();
+        context.Projects.Add(new Project { Id = 1, Name = "Owned", OwnerId = 1 });
+        context.Projects.Add(new Project { Id = 2, Name = "Private", OwnerId = 2 });
+        await context.SaveChangesAsync();
+
+        var controller = CreateController(context, 1);
+        var response = await controller.GetProjects();
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var projects = Assert.IsAssignableFrom<IEnumerable<ProjectResponse>>(ok.Value);
+        var project = Assert.Single(projects);
+        Assert.Equal(1, project.Id);
+        Assert.Equal("Owned", project.Name);
+    }
+
+    [Fact]
     public async Task UpdateProject_ShouldRejectWhitespaceName()
     {
         await using var context = CreateContext();
@@ -92,7 +110,7 @@ public class ProjectsControllerTests
         var controller = CreateController(context, 1);
         var response = await controller.UpdateProject(10, new UpdateProjectRequest { Name = "   " });
 
-        Assert.IsType<BadRequestObjectResult>(response.Result);
+        AssertValidationProblem(response.Result);
     }
 
     [Fact]
@@ -113,9 +131,7 @@ public class ProjectsControllerTests
         var controller = CreateController(context, 1);
         var response = await controller.UpdateProject(11, new UpdateProjectRequest
         {
-            Name = "  Updated name  ",
-            Description = null,
-            DueDate = null
+            Name = "  Updated name  "
         });
 
         var ok = Assert.IsType<OkObjectResult>(response.Result);
@@ -175,6 +191,23 @@ public class ProjectsControllerTests
         Assert.IsType<NotFoundResult>(updateResponse.Result);
     }
 
+    [Fact]
+    public async Task OneUserCannotDeleteAnotherUsersProject()
+    {
+        await using var context = CreateContext();
+        context.Projects.Add(new Project { Id = 21, Name = "Private", OwnerId = 2 });
+        await context.SaveChangesAsync();
+
+        var controller = CreateController(context, 1);
+        var response = await controller.DeleteProject(21);
+
+        Assert.IsType<NotFoundResult>(response);
+
+        var project = await context.Projects.FindAsync(21);
+        Assert.NotNull(project);
+        Assert.Equal(2, project.OwnerId);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("not-an-integer")]
@@ -232,7 +265,7 @@ public class ProjectsControllerTests
             Description = new string('x', 1001)
         });
 
-        Assert.IsType<BadRequestObjectResult>(response.Result);
+        AssertValidationProblem(response.Result);
 
         var stored = await context.Projects.FindAsync(13);
         Assert.NotNull(stored);
@@ -287,5 +320,17 @@ public class ProjectsControllerTests
         var results = new List<ValidationResult>();
         Validator.TryValidateObject(request, new ValidationContext(request), results, true);
         return results;
+    }
+
+    private static void AssertValidationProblem(IActionResult? actionResult)
+    {
+        var result = Assert.IsType<ObjectResult>(actionResult);
+        var problem = Assert.IsType<ValidationProblemDetails>(result.Value);
+        Assert.NotEmpty(problem.Errors);
+        foreach (var messages in problem.Errors.Values)
+        {
+            Assert.NotEmpty(messages);
+            Assert.All(messages, message => Assert.False(string.IsNullOrWhiteSpace(message)));
+        }
     }
 }

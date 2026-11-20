@@ -88,18 +88,18 @@ public class ProjectsController : ControllerBase
 
         if (string.IsNullOrWhiteSpace(request.Name))
         {
-            return BadRequest(new { message = "Project name is required and cannot contain only whitespace." });
+            return ValidationError(nameof(request.Name), "Project name is required and cannot contain only whitespace.");
         }
 
         var name = request.Name.Trim();
         if (name.Length > 100)
         {
-            return BadRequest(new { message = "Project name cannot exceed 100 characters." });
+            return ValidationError(nameof(request.Name), "Project name cannot exceed 100 characters.");
         }
 
         if (request.Description is not null && request.Description.Length > 1000)
         {
-            return BadRequest(new { message = "Project description cannot exceed 1000 characters." });
+            return ValidationError(nameof(request.Description), "Project description cannot exceed 1000 characters.");
         }
 
         var project = new Project
@@ -145,44 +145,42 @@ public class ProjectsController : ControllerBase
             var name = request.Name.Trim();
             if (string.IsNullOrWhiteSpace(name))
             {
-                return BadRequest(new { message = "Project name cannot contain only whitespace." });
+                return ValidationError(nameof(request.Name), "Project name cannot contain only whitespace.");
             }
 
             if (name.Length > 100)
             {
-                return BadRequest(new { message = "Project name cannot exceed 100 characters." });
+                return ValidationError(nameof(request.Name), "Project name cannot exceed 100 characters.");
             }
 
             updatedName = name;
         }
 
         string? updatedDescription = null;
-        if (request.Description is not null)
+        if (request.DescriptionSpecified && request.Description is not null)
         {
             var description = request.Description.Trim();
             if (description.Length > 1000)
             {
-                return BadRequest(new { message = "Project description cannot exceed 1000 characters." });
+                return ValidationError(nameof(request.Description), "Project description cannot exceed 1000 characters.");
             }
 
             updatedDescription = description;
         }
-
-        var updatedDueDate = request.DueDate;
 
         if (updatedName is not null)
         {
             project.Name = updatedName;
         }
 
-        if (request.Description is not null)
+        if (request.DescriptionSpecified)
         {
             project.Description = updatedDescription;
         }
 
-        if (updatedDueDate is not null)
+        if (request.DueDateSpecified)
         {
-            project.DueDate = updatedDueDate.Value;
+            project.DueDate = request.DueDate;
         }
 
         await _context.SaveChangesAsync();
@@ -223,5 +221,11 @@ public class ProjectsController : ControllerBase
     {
         var claimValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return int.TryParse(claimValue, out userId) && userId > 0;
+    }
+
+    private ActionResult ValidationError(string field, string message)
+    {
+        ModelState.AddModelError(field, message);
+        return ValidationProblem();
     }
 }

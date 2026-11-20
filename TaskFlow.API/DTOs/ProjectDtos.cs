@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace TaskFlow.API.DTOs;
 
@@ -29,6 +30,7 @@ public class UpdateProjectRequest
 {
     private string? _name;
     private string? _description;
+    private DateTime? _dueDate;
 
     [StringLength(100, MinimumLength = 1, ErrorMessage = "Project name must be between 1 and 100 characters.")]
     public string? Name
@@ -41,10 +43,28 @@ public class UpdateProjectRequest
     public string? Description
     {
         get => _description;
-        set => _description = value?.Trim();
+        set
+        {
+            DescriptionSpecified = true;
+            _description = value?.Trim();
+        }
     }
 
-    public DateTime? DueDate { get; set; }
+    [JsonIgnore]
+    public bool DescriptionSpecified { get; private set; }
+
+    public DateTime? DueDate
+    {
+        get => _dueDate;
+        set
+        {
+            DueDateSpecified = true;
+            _dueDate = value;
+        }
+    }
+
+    [JsonIgnore]
+    public bool DueDateSpecified { get; private set; }
 }
 
 public class ProjectResponse

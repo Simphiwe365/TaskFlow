@@ -28,7 +28,15 @@ public class AuthController : ControllerBase
 
         if (!result.IsSuccess || result.User is null || string.IsNullOrWhiteSpace(result.Token))
         {
-            return BadRequest(new { message = result.Message });
+            if (result.IsConflict)
+            {
+                return Problem(
+                    statusCode: StatusCodes.Status409Conflict,
+                    title: "Registration conflict",
+                    detail: result.Message);
+            }
+
+            return ValidationError(result.Message);
         }
 
         return Ok(new AuthResponse
@@ -50,7 +58,7 @@ public class AuthController : ControllerBase
 
         if (!result.IsSuccess || result.User is null || string.IsNullOrWhiteSpace(result.Token))
         {
-            return BadRequest(new { message = result.Message });
+            return ValidationError(result.Message);
         }
 
         return Ok(new AuthResponse
@@ -87,5 +95,11 @@ public class AuthController : ControllerBase
             Username = user.Username,
             Email = user.Email
         });
+    }
+
+    private ActionResult ValidationError(string message)
+    {
+        ModelState.AddModelError(string.Empty, message);
+        return ValidationProblem();
     }
 }

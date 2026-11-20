@@ -24,7 +24,10 @@ public class DashboardController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<DashboardResponse>> GetDashboard()
     {
-        var userId = GetCurrentUserId();
+        if (!TryGetCurrentUserId(out var userId))
+        {
+            return Unauthorized();
+        }
 
         var totalProjects = await _context.Projects.CountAsync(p => p.OwnerId == userId);
         var allTasks = await _context.Tasks
@@ -53,11 +56,10 @@ public class DashboardController : ControllerBase
                 CreatedAt = t.CreatedAt,
                 UpdatedAt = t.UpdatedAt,
                 AssigneeId = t.AssigneeId,
-                Assignee = t.Assignee == null ? null : new UserSummaryDto
+                Assignee = t.Assignee == null ? null : new TaskAssigneeDto
                 {
                     Id = t.Assignee.Id,
-                    Username = t.Assignee.Username,
-                    Email = t.Assignee.Email
+                    Username = t.Assignee.Username
                 }
             }).ToList()
         };
@@ -65,10 +67,10 @@ public class DashboardController : ControllerBase
         return Ok(response);
     }
 
-    private int GetCurrentUserId()
+    private bool TryGetCurrentUserId(out int userId)
     {
         var claimValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return int.Parse(claimValue ?? "0");
+        return int.TryParse(claimValue, out userId) && userId > 0;
     }
 }
 

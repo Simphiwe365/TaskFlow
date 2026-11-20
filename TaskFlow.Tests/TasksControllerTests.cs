@@ -55,7 +55,7 @@ public class TasksControllerTests
         var controller = CreateController(context, 1);
         var response = await controller.CreateTask(1, new CreateTaskRequest { Title = title! });
 
-        Assert.IsType<BadRequestObjectResult>(response.Result);
+        AssertValidationProblem(response.Result);
     }
 
     [Fact]
@@ -188,7 +188,7 @@ public class TasksControllerTests
         var controller = CreateController(context, 1);
         var response = await controller.UpdateTask(1, 1, new UpdateTaskRequest { Status = status });
 
-        Assert.IsType<BadRequestObjectResult>(response.Result);
+        AssertValidationProblem(response.Result);
     }
 
     [Theory]
@@ -204,7 +204,7 @@ public class TasksControllerTests
         var controller = CreateController(context, 1);
         var response = await controller.UpdateTask(1, 1, new UpdateTaskRequest { Priority = priority });
 
-        Assert.IsType<BadRequestObjectResult>(response.Result);
+        AssertValidationProblem(response.Result);
     }
 
     [Fact]
@@ -221,7 +221,7 @@ public class TasksControllerTests
             AssigneeId = 999
         });
 
-        Assert.IsType<BadRequestObjectResult>(response.Result);
+        AssertValidationProblem(response.Result);
     }
 
     [Fact]
@@ -256,6 +256,45 @@ public class TasksControllerTests
         Assert.IsType<NotFoundResult>(listResponse.Result);
         Assert.IsType<NotFoundResult>(getResponse.Result);
         Assert.IsType<NotFoundResult>(updateResponse.Result);
+    }
+
+    [Fact]
+    public async Task OneUserCannotCreateTaskUnderAnotherUsersProject()
+    {
+        await using var context = CreateContext();
+        context.Projects.Add(new Project { Id = 1, Name = "Private", OwnerId = 2 });
+        await context.SaveChangesAsync();
+
+        var controller = CreateController(context, 1);
+        var response = await controller.CreateTask(1, new CreateTaskRequest { Title = "Unauthorized task" });
+
+        Assert.IsType<NotFoundResult>(response.Result);
+        Assert.Empty(context.Tasks);
+    }
+
+    [Fact]
+    public async Task OneUserCannotDeleteAnotherUsersTask()
+    {
+        await using var context = CreateContext();
+        context.Projects.Add(new Project { Id = 1, Name = "Private", OwnerId = 2 });
+        context.Tasks.Add(new TaskItem
+        {
+            Id = 1,
+            ProjectId = 1,
+            Title = "Private task",
+            Status = TaskStatus.ToDo,
+            Priority = TaskPriority.Medium
+        });
+        await context.SaveChangesAsync();
+
+        var controller = CreateController(context, 1);
+        var response = await controller.DeleteTask(1, 1);
+
+        Assert.IsType<NotFoundResult>(response);
+
+        var task = await context.Tasks.FindAsync(1);
+        Assert.NotNull(task);
+        Assert.Equal(1, task.ProjectId);
     }
 
     [Fact]
@@ -301,7 +340,7 @@ public class TasksControllerTests
             Status = (TaskStatus)999
         });
 
-        Assert.IsType<BadRequestObjectResult>(response.Result);
+        AssertValidationProblem(response.Result);
     }
 
     [Fact]
@@ -318,7 +357,7 @@ public class TasksControllerTests
             Priority = (TaskPriority)999
         });
 
-        Assert.IsType<BadRequestObjectResult>(response.Result);
+        AssertValidationProblem(response.Result);
     }
 
     [Fact]
@@ -342,7 +381,7 @@ public class TasksControllerTests
             Title = new string('x', 151)
         });
 
-        Assert.IsType<BadRequestObjectResult>(response.Result);
+        AssertValidationProblem(response.Result);
 
         var stored = await context.Tasks.FindAsync(1);
         Assert.NotNull(stored);
@@ -371,7 +410,7 @@ public class TasksControllerTests
             Description = new string('x', 2001)
         });
 
-        Assert.IsType<BadRequestObjectResult>(response.Result);
+        AssertValidationProblem(response.Result);
 
         var stored = await context.Tasks.FindAsync(1);
         Assert.NotNull(stored);
@@ -400,7 +439,7 @@ public class TasksControllerTests
             AssigneeId = 999
         });
 
-        Assert.IsType<BadRequestObjectResult>(response.Result);
+        AssertValidationProblem(response.Result);
 
         var stored = await context.Tasks.FindAsync(1);
         Assert.NotNull(stored);
@@ -475,5 +514,17 @@ public class TasksControllerTests
         var results = new List<ValidationResult>();
         Validator.TryValidateObject(request, new ValidationContext(request), results, true);
         return results;
+    }
+
+    private static void AssertValidationProblem(IActionResult? actionResult)
+    {
+        var result = Assert.IsType<ObjectResult>(actionResult);
+        var problem = Assert.IsType<ValidationProblemDetails>(result.Value);
+        Assert.NotEmpty(problem.Errors);
+        foreach (var messages in problem.Errors.Values)
+        {
+            Assert.NotEmpty(messages);
+            Assert.All(messages, message => Assert.False(string.IsNullOrWhiteSpace(message)));
+        }
     }
 }

@@ -1,0 +1,72 @@
+name: TaskFlow CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Build, test and browser-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore .NET dependencies
+        run: dotnet restore TaskFlow.slnx
+
+      - name: Build solution
+        run: dotnet build TaskFlow.slnx --nologo --no-restore
+
+      - name: Run backend tests
+        run: dotnet test TaskFlow.slnx -m:1 --no-build
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: TaskFlow.Client/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: TaskFlow.Client
+        run: npm ci
+
+      - name: Lint frontend
+        working-directory: TaskFlow.Client
+        run: npm run lint
+
+      - name: Build frontend
+        working-directory: TaskFlow.Client
+        run: npm run build
+
+      - name: Install Playwright Chromium and system dependencies
+        working-directory: TaskFlow.Client
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser tests
+        working-directory: TaskFlow.Client
+        env:
+          CI: true
+        run: npm run test:e2e
+
+      - name: Upload browser test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-diagnostics
+          path: |
+            TaskFlow.Client/test-results/
+            TaskFlow.Client/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7

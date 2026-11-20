@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Search, Plus, CalendarDays, MoreHorizontal, Pencil, Trash2, X } from 'lucide-react'
 import api from '../services/api'
+import useModalAccessibility from '../hooks/useModalAccessibility'
+import { formatDate, toDateInputValue } from '../utils/dateUtils'
 
 const emptyForm = {
   name: '',
@@ -20,31 +22,19 @@ function getApiError(error, fallback) {
     if (messages.length > 0) return messages.join(' ')
   }
 
+  if (typeof data?.detail === 'string' && data.detail.trim()) {
+    return data.detail
+  }
+
+  if (typeof data?.title === 'string' && data.title.trim()) {
+    return data.title
+  }
+
   if (error?.request) {
     return 'Unable to reach the TaskFlow API. Check that the backend is running.'
   }
 
   return fallback
-}
-
-function formatDueDate(value) {
-  if (!value) return 'No due date'
-
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return 'Invalid date'
-
-  return new Intl.DateTimeFormat('en', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(date)
-}
-
-function toInputDate(value) {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toISOString().slice(0, 10)
 }
 
 export default function Projects() {
@@ -53,6 +43,7 @@ export default function Projects() {
   const [loading, setLoading] = useState(true)
   const [mutating, setMutating] = useState(false)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
   const [formError, setFormError] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [editingProject, setEditingProject] = useState(null)
@@ -116,6 +107,7 @@ export default function Projects() {
     setEditingProject(null)
     setForm(emptyForm)
     setFormError('')
+    setSuccess('')
     setFormOpen(true)
   }
 
@@ -124,9 +116,10 @@ export default function Projects() {
     setForm({
       name: project.name ?? '',
       description: project.description ?? '',
-      dueDate: toInputDate(project.dueDate),
+      dueDate: toDateInputValue(project.dueDate),
     })
     setFormError('')
+    setSuccess('')
     setOpenMenuId(null)
     setFormOpen(true)
   }
@@ -137,13 +130,17 @@ export default function Projects() {
     setEditingProject(null)
     setForm(emptyForm)
     setFormError('')
+    setSuccess('')
   }
+
+  const dialogRef = useModalAccessibility(formOpen, closeForm)
 
   const handleSubmit = async (event) => {
     event.preventDefault()
     if (mutating) return
 
     setFormError('')
+    setSuccess('')
 
     if (!form.name.trim()) {
       setFormError('Project name is required.')
@@ -180,6 +177,7 @@ export default function Projects() {
       setForm(emptyForm)
       setFormError('')
       await fetchProjects()
+      setSuccess(editingProject ? 'Project updated.' : 'Project created.')
     } catch (requestError) {
       setFormError(getApiError(requestError, 'Could not save the project.'))
     } finally {
@@ -195,11 +193,13 @@ export default function Projects() {
 
     setMutating(true)
     setError('')
+    setSuccess('')
 
     try {
       await api.delete(`/projects/${project.id}`)
       setOpenMenuId(null)
       await fetchProjects()
+      setSuccess('Project deleted.')
     } catch (requestError) {
       setError(getApiError(requestError, 'Could not delete the project.'))
     } finally {
@@ -216,9 +216,10 @@ export default function Projects() {
         </div>
         <div className="heading-actions">
           <label className="inline-search">
-            <Search size={18} />
+            <Search size={18} aria-hidden="true" />
             <input
               type="search"
+              aria-label="Search projects"
               placeholder="Search projects"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -229,9 +230,10 @@ export default function Projects() {
       </section>
 
       {error && <div className="api-state api-error" role="alert">{error}</div>}
+      {success && <div className="api-state api-success" role="status">{success}</div>}
 
       {loading ? (
-        <div className="api-state">Loading projects...</div>
+        <div className="api-state" role="status" aria-live="polite">Loading projects...</div>
       ) : filteredProjects.length === 0 ? (
         <div className="api-state api-empty">
           <h3>{search ? 'No matching projects' : 'No projects yet'}</h3>
@@ -252,12 +254,14 @@ export default function Projects() {
                       className="icon-button plain"
                       type="button"
                       aria-label={`More actions for ${project.name}`}
+                      aria-expanded={openMenuId === project.id}
+                      aria-controls={`project-menu-${project.id}`}
                       onClick={() => setOpenMenuId(openMenuId === project.id ? null : project.id)}
                     >
                       <MoreHorizontal size={20} />
                     </button>
                     {openMenuId === project.id && (
-                      <div className="project-menu">
+                      <div className="project-menu" id={`project-menu-${project.id}`}>
                         <button type="button" onClick={() => openEdit(project)}><Pencil size={15} /> Edit</button>
                         <button className="delete-action" type="button" onClick={() => handleDelete(project)}><Trash2 size={15} /> Delete</button>
                       </div>
@@ -271,8 +275,7 @@ export default function Projects() {
                   <strong>{project.taskCount ?? 0}</strong>
                 </div>
                 <div className="project-card-footer">
-                  <div className="member-stack" aria-label="Project owner"><span>AM</span></div>
-                  <div className="due-date"><CalendarDays size={15} /> {formatDueDate(project.dueDate)}</div>
+                  <div className="due-date"><CalendarDays size={15} aria-hidden="true" /> {formatDate(project.dueDate) ?? 'No due date'}</div>
                 </div>
               </article>
             )
@@ -282,7 +285,15 @@ export default function Projects() {
 
       {formOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeForm()}>
-          <section className="project-modal" role="dialog" aria-modal="true" aria-labelledby="project-form-title">
+          <section
+            className="project-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="project-form-title"
+            aria-describedby={formError ? 'project-form-error' : undefined}
+            ref={dialogRef}
+            tabIndex={-1}
+          >
             <div className="modal-header">
               <div>
                 <p className="eyebrow">Project details</p>
@@ -292,7 +303,7 @@ export default function Projects() {
             </div>
 
             <form className="project-form" onSubmit={handleSubmit}>
-              {formError && <div className="api-state api-error" role="alert">{formError}</div>}
+              {formError && <div id="project-form-error" className="api-state api-error" role="alert">{formError}</div>}
               <label>
                 <span>Name</span>
                 <input type="text" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} maxLength={101} required />

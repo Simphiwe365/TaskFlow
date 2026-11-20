@@ -46,7 +46,7 @@ public class AuthService
         var exists = await _context.Users.AnyAsync(u => u.Username == username || u.Email == email);
         if (exists)
         {
-            return AuthResult.Fail("A user with that username or email already exists.");
+            return AuthResult.Conflict("Unable to register using the supplied details.");
         }
 
         var user = new User
@@ -122,6 +122,7 @@ public class AuthService
 public class AuthResult
 {
     public bool IsSuccess { get; private set; }
+    public bool IsConflict { get; private set; }
     public string Message { get; private set; } = string.Empty;
     public User? User { get; private set; }
     public string? Token { get; private set; }
@@ -144,6 +145,15 @@ public class AuthResult
         return new AuthResult
         {
             IsSuccess = false,
+            Message = message
+        };
+    }
+
+    public static AuthResult Conflict(string message)
+    {
+        return new AuthResult
+        {
+            IsConflict = true,
             Message = message
         };
     }

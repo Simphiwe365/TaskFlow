@@ -2,7 +2,7 @@ export default function StatCard({ icon: Icon, label, value, change, tone = 'blu
   return (
     <article className="stat-card">
       <div className={`stat-icon ${tone}`}>
-        <Icon size={20} />
+        <Icon size={20} aria-hidden="true" />
       </div>
       <div className="stat-copy">
         <span>{label}</span>

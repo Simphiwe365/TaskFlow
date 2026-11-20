@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using TaskFlow.API.Models;
 using TaskFlowTaskStatus = TaskFlow.API.Models.TaskStatus;
 
@@ -34,6 +35,8 @@ public class UpdateTaskRequest
 {
     private string? _title;
     private string? _description;
+    private DateTime? _dueDate;
+    private int? _assigneeId;
 
     [StringLength(150, MinimumLength = 1, ErrorMessage = "Task title must be between 1 and 150 characters.")]
     public string? Title
@@ -46,13 +49,44 @@ public class UpdateTaskRequest
     public string? Description
     {
         get => _description;
-        set => _description = value?.Trim();
+        set
+        {
+            DescriptionSpecified = true;
+            _description = value?.Trim();
+        }
     }
+
+    [JsonIgnore]
+    public bool DescriptionSpecified { get; private set; }
 
     public TaskFlowTaskStatus? Status { get; set; }
     public TaskPriority? Priority { get; set; }
-    public DateTime? DueDate { get; set; }
-    public int? AssigneeId { get; set; }
+
+    public DateTime? DueDate
+    {
+        get => _dueDate;
+        set
+        {
+            DueDateSpecified = true;
+            _dueDate = value;
+        }
+    }
+
+    [JsonIgnore]
+    public bool DueDateSpecified { get; private set; }
+
+    public int? AssigneeId
+    {
+        get => _assigneeId;
+        set
+        {
+            AssigneeIdSpecified = true;
+            _assigneeId = value;
+        }
+    }
+
+    [JsonIgnore]
+    public bool AssigneeIdSpecified { get; private set; }
 }
 
 public class TaskResponse
@@ -67,5 +101,11 @@ public class TaskResponse
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public int? AssigneeId { get; set; }
-    public UserSummaryDto? Assignee { get; set; }
+    public TaskAssigneeDto? Assignee { get; set; }
+}
+
+public class TaskAssigneeDto
+{
+    public int Id { get; set; }
+    public string Username { get; set; } = string.Empty;
 }

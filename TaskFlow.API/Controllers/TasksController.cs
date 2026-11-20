@@ -54,11 +54,10 @@ public class TasksController : ControllerBase
                 CreatedAt = t.CreatedAt,
                 UpdatedAt = t.UpdatedAt,
                 AssigneeId = t.AssigneeId,
-                Assignee = t.Assignee == null ? null : new UserSummaryDto
+                Assignee = t.Assignee == null ? null : new TaskAssigneeDto
                 {
                     Id = t.Assignee.Id,
-                    Username = t.Assignee.Username,
-                    Email = t.Assignee.Email
+                    Username = t.Assignee.Username
                 }
             })
             .ToListAsync();
@@ -93,11 +92,10 @@ public class TasksController : ControllerBase
                 CreatedAt = t.CreatedAt,
                 UpdatedAt = t.UpdatedAt,
                 AssigneeId = t.AssigneeId,
-                Assignee = t.Assignee == null ? null : new UserSummaryDto
+                Assignee = t.Assignee == null ? null : new TaskAssigneeDto
                 {
                     Id = t.Assignee.Id,
-                    Username = t.Assignee.Username,
-                    Email = t.Assignee.Email
+                    Username = t.Assignee.Username
                 }
             })
             .FirstOrDefaultAsync();
@@ -131,28 +129,28 @@ public class TasksController : ControllerBase
         var title = request.Title?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(title))
         {
-            return BadRequest(new { message = "Task title is required and cannot contain only whitespace." });
+            return ValidationError(nameof(request.Title), "Task title is required and cannot contain only whitespace.");
         }
 
         if (title.Length > 150)
         {
-            return BadRequest(new { message = "Task title cannot exceed 150 characters." });
+            return ValidationError(nameof(request.Title), "Task title cannot exceed 150 characters.");
         }
 
         var description = request.Description?.Trim();
         if (description is not null && description.Length > 2000)
         {
-            return BadRequest(new { message = "Task description cannot exceed 2000 characters." });
+            return ValidationError(nameof(request.Description), "Task description cannot exceed 2000 characters.");
         }
 
         if (!Enum.IsDefined(request.Status))
         {
-            return BadRequest(new { message = "Invalid task status." });
+            return ValidationError(nameof(request.Status), "Invalid task status.");
         }
 
         if (!Enum.IsDefined(request.Priority))
         {
-            return BadRequest(new { message = "Invalid task priority." });
+            return ValidationError(nameof(request.Priority), "Invalid task priority.");
         }
 
         if (request.AssigneeId.HasValue)
@@ -162,7 +160,7 @@ public class TasksController : ControllerBase
 
             if (!assigneeExists)
             {
-                return BadRequest(new { message = "Assignee must be a valid user in the system." });
+                return ValidationError(nameof(request.AssigneeId), "Assignee must be a valid user in the system.");
             }
         }
 
@@ -198,11 +196,10 @@ public class TasksController : ControllerBase
                 CreatedAt = t.CreatedAt,
                 UpdatedAt = t.UpdatedAt,
                 AssigneeId = t.AssigneeId,
-                Assignee = t.Assignee == null ? null : new UserSummaryDto
+                Assignee = t.Assignee == null ? null : new TaskAssigneeDto
                 {
                     Id = t.Assignee.Id,
-                    Username = t.Assignee.Username,
-                    Email = t.Assignee.Email
+                    Username = t.Assignee.Username
                 }
             })
             .FirstAsync();
@@ -239,24 +236,24 @@ public class TasksController : ControllerBase
             var title = request.Title.Trim();
             if (string.IsNullOrWhiteSpace(title))
             {
-                return BadRequest(new { message = "Task title cannot contain only whitespace." });
+                return ValidationError(nameof(request.Title), "Task title cannot contain only whitespace.");
             }
 
             if (title.Length > 150)
             {
-                return BadRequest(new { message = "Task title cannot exceed 150 characters." });
+                return ValidationError(nameof(request.Title), "Task title cannot exceed 150 characters.");
             }
 
             updatedTitle = title;
         }
 
         string? updatedDescription = null;
-        if (request.Description is not null)
+        if (request.DescriptionSpecified && request.Description is not null)
         {
             var description = request.Description.Trim();
             if (description.Length > 2000)
             {
-                return BadRequest(new { message = "Task description cannot exceed 2000 characters." });
+                return ValidationError(nameof(request.Description), "Task description cannot exceed 2000 characters.");
             }
 
             updatedDescription = description;
@@ -267,7 +264,7 @@ public class TasksController : ControllerBase
         {
             if (!Enum.IsDefined(request.Status.Value))
             {
-                return BadRequest(new { message = "Invalid task status." });
+                return ValidationError(nameof(request.Status), "Invalid task status.");
             }
 
             updatedStatus = request.Status.Value;
@@ -278,34 +275,32 @@ public class TasksController : ControllerBase
         {
             if (!Enum.IsDefined(request.Priority.Value))
             {
-                return BadRequest(new { message = "Invalid task priority." });
+                return ValidationError(nameof(request.Priority), "Invalid task priority.");
             }
 
             updatedPriority = request.Priority.Value;
         }
 
         int? updatedAssigneeId = null;
-        if (request.AssigneeId.HasValue)
+        if (request.AssigneeIdSpecified && request.AssigneeId.HasValue)
         {
             var assigneeExists = await _context.Users.AnyAsync(
                 u => u.Id == request.AssigneeId.Value);
 
             if (!assigneeExists)
             {
-                return BadRequest(new { message = "Assignee must be a valid user in the system." });
+                return ValidationError(nameof(request.AssigneeId), "Assignee must be a valid user in the system.");
             }
 
             updatedAssigneeId = request.AssigneeId.Value;
         }
-
-        var updatedDueDate = request.DueDate;
 
         if (updatedTitle is not null)
         {
             task.Title = updatedTitle;
         }
 
-        if (request.Description is not null)
+        if (request.DescriptionSpecified)
         {
             task.Description = updatedDescription;
         }
@@ -320,12 +315,12 @@ public class TasksController : ControllerBase
             task.Priority = updatedPriority.Value;
         }
 
-        if (updatedDueDate is not null)
+        if (request.DueDateSpecified)
         {
-            task.DueDate = updatedDueDate.Value;
+            task.DueDate = request.DueDate;
         }
 
-        if (request.AssigneeId.HasValue)
+        if (request.AssigneeIdSpecified)
         {
             task.AssigneeId = updatedAssigneeId;
         }
@@ -334,10 +329,12 @@ public class TasksController : ControllerBase
         await _context.SaveChangesAsync();
 
         var assignee = task.Assignee;
-        if (request.AssigneeId.HasValue)
+        if (request.AssigneeIdSpecified)
         {
-            assignee = await _context.Users.AsNoTracking().FirstOrDefaultAsync(
-                u => u.Id == request.AssigneeId.Value);
+            assignee = request.AssigneeId.HasValue
+                ? await _context.Users.AsNoTracking().FirstOrDefaultAsync(
+                    u => u.Id == request.AssigneeId.Value)
+                : null;
         }
 
         return Ok(new TaskResponse
@@ -352,11 +349,10 @@ public class TasksController : ControllerBase
             CreatedAt = task.CreatedAt,
             UpdatedAt = task.UpdatedAt,
             AssigneeId = task.AssigneeId,
-            Assignee = assignee == null ? null : new UserSummaryDto
+            Assignee = assignee == null ? null : new TaskAssigneeDto
             {
                 Id = assignee.Id,
-                Username = assignee.Username,
-                Email = assignee.Email
+                Username = assignee.Username
             }
         });
     }
@@ -389,5 +385,11 @@ public class TasksController : ControllerBase
     {
         var claimValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return int.TryParse(claimValue, out userId) && userId > 0;
+    }
+
+    private ActionResult ValidationError(string field, string message)
+    {
+        ModelState.AddModelError(field, message);
+        return ValidationProblem();
     }
 }

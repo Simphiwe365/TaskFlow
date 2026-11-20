@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Filter, MoreHorizontal, Pencil, Trash2, X, CalendarDays } from 'lucide-react'
+import { Plus, MoreHorizontal, Pencil, Trash2, X, CalendarDays, Check } from 'lucide-react'
 import api from '../services/api'
+import useModalAccessibility from '../hooks/useModalAccessibility'
+import { formatDate, toDateInputValue } from '../utils/dateUtils'
 
 const statusOptions = [
 	{ value: 0, label: 'To Do' },
@@ -38,6 +40,14 @@ function getApiError(error, fallback) {
 		if (messages.length > 0) return messages.join(' ')
 	}
 
+	if (typeof data?.detail === 'string' && data.detail.trim()) {
+		return data.detail
+	}
+
+	if (typeof data?.title === 'string' && data.title.trim()) {
+		return data.title
+	}
+
 	if (error?.request) {
 		return 'Unable to reach the TaskFlow API. Check that the backend is running.'
 	}
@@ -45,38 +55,37 @@ function getApiError(error, fallback) {
 	return fallback
 }
 
-function formatDueDate(value) {
-	if (!value) return 'No due date'
-
-	const date = new Date(value)
-	if (Number.isNaN(date.getTime())) return 'No due date'
-
-	return new Intl.DateTimeFormat('en', {
-		day: 'numeric',
-		month: 'short',
-		year: 'numeric',
-	}).format(date)
-}
-
-function toInputDate(value) {
-	if (!value) return ''
-	const date = new Date(value)
-	if (Number.isNaN(date.getTime())) return ''
-	return date.toISOString().slice(0, 10)
-}
-
 function statusLabel(status) {
 	if (typeof status === 'number') {
 		return statusOptions.find((option) => option.value === status)?.label ?? 'Unknown'
 	}
-	return status ?? 'Unknown'
+
+	const normalized = String(status ?? '').replaceAll(/[^a-z]/gi, '').toLowerCase()
+	return statusOptions.find((option) =>
+		option.label.replaceAll(/[^a-z]/gi, '').toLowerCase() === normalized ||
+		['todo', 'inprogress', 'review', 'done', 'blocked'][option.value] === normalized,
+	)?.label ?? 'Unknown'
 }
 
 function priorityLabel(priority) {
 	if (typeof priority === 'number') {
 		return priorityOptions.find((option) => option.value === priority)?.label ?? 'Unknown'
 	}
-	return priority ?? 'Unknown'
+
+	const normalized = String(priority ?? '').trim().toLowerCase()
+	return priorityOptions.find((option) => option.label.toLowerCase() === normalized)?.label ?? 'Unknown'
+}
+
+function getOptionValue(value, options, enumNames, fallback) {
+	if (typeof value === 'number') {
+		return options.some((option) => option.value === value) ? value : fallback
+	}
+
+	const normalized = String(value ?? '').replaceAll(/[^a-z]/gi, '').toLowerCase()
+	return options.find((option) =>
+		option.label.replaceAll(/[^a-z]/gi, '').toLowerCase() === normalized ||
+		enumNames[option.value] === normalized,
+	)?.value ?? fallback
 }
 
 export default function Tasks() {
@@ -86,6 +95,7 @@ export default function Tasks() {
 	const [loading, setLoading] = useState(true)
 	const [mutating, setMutating] = useState(false)
 	const [error, setError] = useState('')
+	const [success, setSuccess] = useState('')
 	const [formError, setFormError] = useState('')
 	const [formOpen, setFormOpen] = useState(false)
 	const [editingTask, setEditingTask] = useState(null)
@@ -143,6 +153,7 @@ export default function Tasks() {
 		const loadTasks = async () => {
 			setLoading(true)
 			setError('')
+			setSuccess('')
 
 			try {
 				const response = await api.get(`/projects/${selectedProjectId}/tasks`)
@@ -187,6 +198,7 @@ export default function Tasks() {
 		setEditingTask(null)
 		setForm(emptyForm)
 		setFormError('')
+		setSuccess('')
 		setFormOpen(true)
 	}
 
@@ -195,12 +207,13 @@ export default function Tasks() {
 		setForm({
 			title: task.title ?? '',
 			description: task.description ?? '',
-			status: typeof task.status === 'number' ? task.status : statusOptions.find((option) => option.label === task.status)?.value ?? 0,
-			priority: typeof task.priority === 'number' ? task.priority : priorityOptions.find((option) => option.label === task.priority)?.value ?? 1,
-			dueDate: toInputDate(task.dueDate),
+			status: getOptionValue(task.status, statusOptions, ['todo', 'inprogress', 'review', 'done', 'blocked'], 0),
+			priority: getOptionValue(task.priority, priorityOptions, ['low', 'medium', 'high', 'urgent'], 1),
+			dueDate: toDateInputValue(task.dueDate),
 			assigneeId: task.assigneeId?.toString() ?? '',
 		})
 		setFormError('')
+		setSuccess('')
 		setOpenMenuId(null)
 		setFormOpen(true)
 	}
@@ -211,13 +224,17 @@ export default function Tasks() {
 		setEditingTask(null)
 		setForm(emptyForm)
 		setFormError('')
+		setSuccess('')
 	}
+
+	const dialogRef = useModalAccessibility(formOpen, closeForm)
 
 	const handleSubmit = async (event) => {
 		event.preventDefault()
 		if (mutating || !selectedProjectId) return
 
 		setFormError('')
+		setSuccess('')
 
 		if (!form.title.trim()) {
 			setFormError('Task title is required.')
@@ -263,6 +280,7 @@ export default function Tasks() {
 			setForm(emptyForm)
 			setFormError('')
 			await fetchTasks()
+			setSuccess(editingTask ? 'Task updated.' : 'Task created.')
 		} catch (requestError) {
 			setFormError(getApiError(requestError, 'Could not save the task.'))
 		} finally {
@@ -278,13 +296,33 @@ export default function Tasks() {
 
 		setMutating(true)
 		setError('')
+		setSuccess('')
 
 		try {
 			await api.delete(`/projects/${selectedProjectId}/tasks/${task.id}`)
 			setOpenMenuId(null)
 			await fetchTasks()
+			setSuccess('Task deleted.')
 		} catch (requestError) {
 			setError(getApiError(requestError, 'Could not delete the task.'))
+		} finally {
+			setMutating(false)
+		}
+	}
+
+	const handleMarkComplete = async (task) => {
+		if (mutating || !selectedProjectId || statusLabel(task.status) === 'Done') return
+
+		setMutating(true)
+		setError('')
+		setSuccess('')
+
+		try {
+			await api.put(`/projects/${selectedProjectId}/tasks/${task.id}`, { status: 3 })
+			await fetchTasks()
+			setSuccess('Task marked complete.')
+		} catch (requestError) {
+			setError(getApiError(requestError, 'Could not update the task.'))
 		} finally {
 			setMutating(false)
 		}
@@ -300,22 +338,22 @@ export default function Tasks() {
 				<div className="heading-actions">
 					<label className="task-project-select">
 						<span>Project</span>
-						<select value={selectedProjectId ?? ''} onChange={(event) => setSelectedProjectId(Number(event.target.value))} disabled={projects.length === 0}>
+						<select aria-label="Select project" value={selectedProjectId ?? ''} onChange={(event) => setSelectedProjectId(Number(event.target.value))} disabled={projects.length === 0 || mutating}>
 							{projects.length === 0 && <option value="">No projects</option>}
 							{projects.map((project) => (
 								<option key={project.id} value={project.id}>{project.name}</option>
 							))}
 						</select>
 					</label>
-					<button className="secondary-button" type="button" disabled><Filter size={17} /> Filter</button>
 					<button className="primary-button" type="button" onClick={openCreate} disabled={!selectedProjectId}><Plus size={18} /> Add Task</button>
 				</div>
 			</section>
 
 			{error && <div className="api-state api-error" role="alert">{error}</div>}
+			{success && <div className="api-state api-success" role="status">{success}</div>}
 
 			{loading ? (
-				<div className="api-state">Loading tasks...</div>
+				<div className="api-state" role="status" aria-live="polite">Loading tasks...</div>
 			) : !selectedProject ? (
 				<div className="api-state api-empty">
 					<h3>No projects available</h3>
@@ -328,30 +366,36 @@ export default function Tasks() {
 					<button className="primary-button" type="button" onClick={openCreate}><Plus size={18} /> Add Task</button>
 				</div>
 			) : (
-				<section className="table-card">
+				<section className="table-card" role="table" aria-label={`Tasks in ${selectedProject.name}`}>
 					<div className="task-table table-header" role="row">
-						<span>Task</span><span>Project</span><span>Priority</span><span>Status</span><span>Due date</span><span>Assignee</span><span />
+						<span role="columnheader">Task</span><span role="columnheader">Project</span><span role="columnheader">Priority</span><span role="columnheader">Status</span><span role="columnheader">Due date</span><span role="columnheader">Assignee</span><span role="columnheader" aria-label="Actions" />
 					</div>
 					{tasks.map((task) => {
 						const status = statusLabel(task.status)
 						const priority = priorityLabel(task.priority)
-						const assigneeName = task.assignee?.username ?? (task.assigneeId ? `User ${task.assigneeId}` : 'Unassigned')
+						const isComplete = status === 'Done'
+						const assigneeName = task.assignee?.username ?? (task.assigneeId ? `User #${task.assigneeId}` : 'Unassigned')
 
 						return (
 							<div className="task-table task-row-table" role="row" key={task.id}>
-								<div className="table-task-name">
-									<button className="task-check" type="button" aria-label={`Mark ${task.title} complete`} />
+								<div className="table-task-name" role="cell">
+									<button className={`task-check${isComplete ? ' completed' : ''}`} type="button" aria-label={isComplete ? `${task.title} is complete` : `Mark ${task.title} complete`} aria-pressed={isComplete} disabled={mutating || isComplete} onClick={() => handleMarkComplete(task)}>
+										{isComplete && <Check size={12} aria-hidden="true" />}
+									</button>
 									<strong>{task.title}</strong>
 								</div>
-								<span className="muted-text">{selectedProject.name}</span>
-								<span><span className={`priority-badge priority-${priority.toLowerCase()}`}>{priority}</span></span>
-								<span><span className={`status-badge status-${status.toLowerCase().replaceAll(' ', '-')}`}>{status}</span></span>
-								<span className="muted-text"><span className="task-due"><CalendarDays size={14} /> {formatDueDate(task.dueDate)}</span></span>
-								<span className="table-avatar" title={assigneeName}>{task.assignee?.username?.slice(0, 2).toUpperCase() ?? (task.assigneeId ? `U${task.assigneeId}` : '—')}</span>
-								<div className="task-menu-wrap">
-									<button className="icon-button plain" type="button" aria-label={`More actions for ${task.title}`} onClick={() => setOpenMenuId(openMenuId === task.id ? null : task.id)}><MoreHorizontal size={18} /></button>
+								<span className="muted-text" role="cell">{selectedProject.name}</span>
+								<span role="cell"><span className={`priority-badge priority-${priority.toLowerCase()}`}>{priority}</span></span>
+								<span role="cell"><span className={`status-badge status-${status.toLowerCase().replaceAll(' ', '-')}`}>{status}</span></span>
+								<span className="muted-text" role="cell"><span className="task-due"><CalendarDays size={14} aria-hidden="true" /> {formatDate(task.dueDate) ?? 'No due date'}</span></span>
+								<span className="assignee-cell" role="cell">
+									<span className="table-avatar" aria-hidden="true">{task.assignee?.username?.slice(0, 2).toUpperCase() ?? (task.assigneeId ? `U${task.assigneeId}` : '—')}</span>
+									<span className="assignee-name">{assigneeName}</span>
+								</span>
+								<div className="task-menu-wrap" role="cell">
+									<button className="icon-button plain" type="button" aria-label={`More actions for ${task.title}`} aria-expanded={openMenuId === task.id} aria-controls={`task-menu-${task.id}`} onClick={() => setOpenMenuId(openMenuId === task.id ? null : task.id)}><MoreHorizontal size={18} /></button>
 									{openMenuId === task.id && (
-										<div className="task-menu">
+										<div className="task-menu" id={`task-menu-${task.id}`}>
 											<button type="button" onClick={() => openEdit(task)}><Pencil size={15} /> Edit</button>
 											<button className="delete-action" type="button" onClick={() => handleDelete(task)}><Trash2 size={15} /> Delete</button>
 										</div>
@@ -365,7 +409,7 @@ export default function Tasks() {
 
 			{formOpen && (
 				<div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeForm()}>
-					<section className="project-modal" role="dialog" aria-modal="true" aria-labelledby="task-form-title">
+					<section className="project-modal" role="dialog" aria-modal="true" aria-labelledby="task-form-title" aria-describedby={formError ? 'task-form-error' : undefined} ref={dialogRef} tabIndex={-1}>
 						<div className="modal-header">
 							<div>
 								<p className="eyebrow">Task details</p>
@@ -375,7 +419,7 @@ export default function Tasks() {
 						</div>
 
 						<form className="project-form" onSubmit={handleSubmit}>
-							{formError && <div className="api-state api-error" role="alert">{formError}</div>}
+							{formError && <div id="task-form-error" className="api-state api-error" role="alert">{formError}</div>}
 							<label>
 								<span>Title</span>
 								<input type="text" value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} maxLength={151} required />
@@ -405,7 +449,8 @@ export default function Tasks() {
 								</label>
 								<label>
 									<span>Assignee ID</span>
-									<input type="number" min="1" value={form.assigneeId} onChange={(event) => setForm((current) => ({ ...current, assigneeId: event.target.value }))} placeholder="Optional" />
+									<input type="number" min="1" value={form.assigneeId} onChange={(event) => setForm((current) => ({ ...current, assigneeId: event.target.value }))} placeholder="Optional" aria-describedby="assignee-help" />
+									<small id="assignee-help" className="field-help">Enter an existing user ID, or leave blank to unassign.</small>
 								</label>
 							</div>
 							<div className="modal-actions">

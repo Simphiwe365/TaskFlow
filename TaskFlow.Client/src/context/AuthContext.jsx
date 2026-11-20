@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { login as loginRequest, register as registerRequest } from '../services/authService'
 import { AuthContext } from './useAuth'
 
@@ -6,6 +6,16 @@ const TOKEN_KEY = 'taskflow_token'
 
 export function AuthProvider({ children }) {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY))
+
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      localStorage.removeItem(TOKEN_KEY)
+      setToken(null)
+    }
+
+    window.addEventListener('taskflow:unauthorized', handleUnauthorized)
+    return () => window.removeEventListener('taskflow:unauthorized', handleUnauthorized)
+  }, [])
 
   const login = async (credentials) => {
     const response = await loginRequest(credentials)

@@ -14,6 +14,10 @@ function getAuthError(error) {
     }
   }
 
+  if (typeof data?.detail === 'string' && data.detail.trim()) {
+    return new Error(data.detail)
+  }
+
   if (typeof data?.title === 'string' && data.title.trim()) {
     return new Error(data.title)
   }

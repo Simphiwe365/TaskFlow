@@ -1,0 +1,46 @@
+services:
+  - type: web
+    name: taskflow-api
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./TaskFlow.API/Dockerfile
+    dockerContext: .
+    autoDeployTrigger: off
+    healthCheckPath: /api/health/ready
+    disk:
+      name: taskflow-sqlite-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: Hosting__HttpsTerminatedAtProxy
+        value: "true"
+      - key: Database__ApplyMigrationsOnStartup
+        value: "true"
+      - key: ConnectionStrings__DefaultConnection
+        value: Data Source=/var/data/taskflow.db
+      - key: JwtSettings__Key
+        generateValue: true
+      - key: JwtSettings__Issuer
+        value: TaskFlowAPI
+      - key: JwtSettings__Audience
+        value: TaskFlowClient
+      - key: JwtSettings__ExpiryMinutes
+        value: "60"
+      - key: Cors__AllowedOrigins__0
+        sync: false
+
+  - type: web
+    name: taskflow-client
+    runtime: static
+    autoDeployTrigger: off
+    buildCommand: cd TaskFlow.Client && npm ci && npm run build
+    staticPublishPath: TaskFlow.Client/dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
